@@ -6,7 +6,6 @@
   var $ = function (sel, ctx) { return (ctx || document).querySelector(sel); };
   var $$ = function (sel, ctx) { return Array.prototype.slice.call((ctx || document).querySelectorAll(sel)); };
   var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-  var finePointer = window.matchMedia('(hover: hover) and (pointer: fine)');
 
   function debounce(fn, wait) {
     var t;
@@ -117,12 +116,11 @@
     build();
     window.addEventListener('resize', debounce(build, 150));
 
-    if (!finePointer.matches) return;
     var cx = $('.ruler--x .ruler__cursor b');
     var cy = $('.ruler--y .ruler__cursor b');
     var frame = 0;
     hero.addEventListener('pointermove', function (e) {
-      if (frame) return;
+      if (e.pointerType === 'touch' || frame) return;
       frame = window.requestAnimationFrame(function () {
         frame = 0;
         var xb = xr.getBoundingClientRect();
