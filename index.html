@@ -36,9 +36,20 @@
 <meta name="msapplication-TileImage" content="./haas_ib-2.png">
 
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-<link rel="preload" href="./assets/fonts/archivo-var.woff2" as="font" type="font/woff2" crossorigin>
+<script>
+  document.documentElement.classList.add('js');
+  // Font preloads are CORS requests, which file:// pages can't make; @font-face still loads the font locally.
+  if (location.protocol !== 'file:') {
+    var preload = document.createElement('link');
+    preload.rel = 'preload';
+    preload.as = 'font';
+    preload.type = 'font/woff2';
+    preload.crossOrigin = 'anonymous';
+    preload.href = './assets/fonts/archivo-var.woff2';
+    document.head.appendChild(preload);
+  }
+</script>
 <link rel="stylesheet" href="./assets/css/site.css">
-<script>document.documentElement.classList.add('js');</script>
 <script defer src="./assets/js/site.js"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/gsap@3.15.0/dist/gsap.min.js" integrity="sha384-XmJ9SoHtVOHoQUcKvFAzVXwdkKo1Ie3bhmSoIAkcdsHGaIrVJIkmozyq0FJeb/Ly" crossorigin="anonymous"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/gsap@3.15.0/dist/ScrollTrigger.min.js" integrity="sha384-wl5TeDVvOWt30Pbf8aSo2ZrzsOjddu3avOBvHe+p+OhJt9gP6w9YXmDkN5DK2/dF" crossorigin="anonymous"></script>
