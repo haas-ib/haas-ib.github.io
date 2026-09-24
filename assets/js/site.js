@@ -14,6 +14,8 @@
   }
 
   function formatDim(w, h) { return Math.round(w) + ' × ' + Math.round(h); }
+  function setValue(el, text) { el.setAttribute('data-value', text); }
+  function getValue(el) { return el.getAttribute('data-value') || ''; }
 
   /* ---------- Footer year ---------- */
   $$('[data-year]').forEach(function (el) { el.textContent = String(new Date().getFullYear()); });
@@ -52,8 +54,8 @@
     var bp = $('[data-breakpoint]');
     function update() {
       var w = window.innerWidth;
-      if (dim) dim.textContent = formatDim(w, window.innerHeight);
-      if (bp) bp.textContent = w >= 1024 ? 'Desktop' : (w >= 640 ? 'Tablet' : 'Mobile');
+      if (dim) setValue(dim, formatDim(w, window.innerHeight));
+      if (bp) setValue(bp, w >= 1024 ? 'Desktop' : (w >= 640 ? 'Tablet' : 'Mobile'));
     }
     update();
     window.addEventListener('resize', update, { passive: true });
@@ -66,14 +68,14 @@
     var label = $('[data-measure-label]');
     if (name && label && !measureLocked) {
       var r = name.getBoundingClientRect();
-      label.textContent = formatDim(r.width, r.height);
+      setValue(label, formatDim(r.width, r.height));
     }
     $$('[data-dim]').forEach(function (el) {
       if (el.__counting) return;
       var section = el.closest('section');
       if (!section) return;
       var s = section.getBoundingClientRect();
-      el.textContent = formatDim(s.width, s.height);
+      setValue(el, formatDim(s.width, s.height));
     });
   }
   function initMeasure() {
@@ -104,7 +106,7 @@
         var frag = document.createDocumentFragment();
         for (var i = 0; i < size; i += 100) {
           var n = document.createElement('span');
-          n.textContent = String(i);
+          n.setAttribute('data-value', String(i));
           n.style[side] = i + 'px';
           frag.appendChild(n);
         }
@@ -129,8 +131,8 @@
         var y = Math.max(0, Math.round(e.clientY - yb.top));
         hero.style.setProperty('--mx', x + 'px');
         hero.style.setProperty('--my', y + 'px');
-        if (cx) cx.textContent = String(x);
-        if (cy) cy.textContent = String(y);
+        if (cx) setValue(cx, String(x));
+        if (cy) setValue(cy, String(y));
         hero.classList.add('is-tracking');
       });
     });
@@ -258,45 +260,80 @@
     targets.forEach(function (t) { io.observe(t); });
   }
 
+  /* ---------- Cover intro: CSS runs the motion, JS counts the measurement ---------- */
+  function initCoverIntro() {
+    var name = $('[data-measure]');
+    var label = $('[data-measure-label]');
+    var letters = $$('.hc');
+    var last = letters[letters.length - 1];
+    var running = last && last.getAnimations && last.getAnimations().length > 0;
+    if (!running) return;
+    last.addEventListener('animationend', function () { measure(); }, { once: true });
+
+    if (!name || !label) return;
+    var pill = label.getAnimations ? label.getAnimations()[0] : null;
+    var delay = 1050;
+    var elapsed = pill && pill.currentTime != null ? pill.currentTime : 0;
+    if (elapsed > delay + 1300) return;
+    measureLocked = true;
+    setTimeout(function () {
+      var box = name.getBoundingClientRect();
+      var t0 = performance.now();
+      var duration = 1300;
+      (function step(now) {
+        var p = Math.min(1, (now - t0) / duration);
+        var e = 1 - Math.pow(1 - p, 3);
+        setValue(label, formatDim(box.width * e, box.height * e));
+        if (p < 1) window.requestAnimationFrame(step);
+        else { measureLocked = false; measure(); }
+      })(t0);
+    }, Math.max(0, delay - elapsed));
+  }
+
   /* ---------- Motion (GSAP + ScrollTrigger + SplitText) ---------- */
   function initMotion() {
     var gsap = window.gsap;
     var ST = window.ScrollTrigger;
     var Split = window.SplitText;
-    if (!gsap || !ST) { root.classList.remove('motion'); return; }
+    if (!gsap || !ST) return;
     gsap.registerPlugin(ST);
     if (Split) gsap.registerPlugin(Split);
     ST.config({ ignoreMobileResize: true });
 
     var split = function (el, vars) { return Split ? Split.create(el, vars) : null; };
 
-    // If the fallback timer already revealed the hero, don't hide it again.
-    var introAllowed = root.classList.contains('motion');
-
+    var steps = [progress, heads, products, work, record, words, contact, footer];
     var mm = gsap.matchMedia();
-    mm.add({ motion: '(prefers-reduced-motion: no-preference)', wide: '(min-width: 1024px)' }, function (ctx) {
-      if (!ctx.conditions.motion) { root.classList.remove('motion'); return; }
-      window.__introStarted = true;
-
-      if (introAllowed) intro(gsap, split);
-      introAllowed = false;
-      heads(gsap, split);
-      products(gsap, split);
-      work(gsap);
-      record(gsap);
-      words(gsap, split);
-      contact(gsap);
-      footer(gsap);
-
-      gsap.to('.bar__progress', {
-        scaleX: 1, ease: 'none',
-        scrollTrigger: { trigger: document.body, start: 'top top', end: 'bottom bottom', scrub: 0.3 }
-      });
-
-      return function () { root.classList.remove('motion'); measureLocked = false; };
+    mm.add('(prefers-reduced-motion: no-preference)', function (ctx) {
+      motionCtx = ctx;
+      // One section per task keeps each setup step short on slow phones.
+      var alive = true;
+      (function next(i) {
+        if (!alive || i >= steps.length) return;
+        ctx.add(function () { steps[i](gsap, split); });
+        setTimeout(function () { next(i + 1); }, 0);
+      })(0);
+      return function () { alive = false; motionCtx = null; };
     });
 
     window.addEventListener('load', function () { ST.refresh(); });
+  }
+
+  // Build an element's animation only when it is within reach, so text splitting
+  // (which forces layout) happens a little at a time instead of all at start-up.
+  var motionCtx = null;
+  function whenNear(el, setup) {
+    window.ScrollTrigger.create({
+      trigger: el, start: 'top bottom+=80%', once: true,
+      onEnter: function () { if (motionCtx) motionCtx.add(setup); }
+    });
+  }
+
+  function progress(gsap) {
+    gsap.to('.bar__progress', {
+      scaleX: 1, ease: 'none',
+      scrollTrigger: { trigger: document.body, start: 'top top', end: 'bottom bottom', scrub: 0.3 }
+    });
   }
 
   function countTo(gsap, el, opts) {
@@ -310,59 +347,6 @@
     }, opts || {}));
   }
 
-  function intro(gsap, split) {
-    var words = $$('.hero__word');
-    var sel = $('.selection--hero');
-    var label = $('[data-measure-label]');
-    var lede = $('.hero__lede');
-    var chars = [];
-    var splits = words.map(function (w) { return split(w, { type: 'chars', charsClass: 'hc' }); }).filter(Boolean);
-    splits.forEach(function (s) { chars = chars.concat(s.chars); });
-
-    var tl = gsap.timeline({ defaults: { ease: 'expo.out' }, delay: 0.1 });
-
-    tl.fromTo('.ruler--x .ruler__ticks', { autoAlpha: 1, clipPath: 'inset(0% 100% 0% 0%)' }, { clipPath: 'inset(0% 0% 0% 0%)', duration: 1.6, ease: 'expo.inOut' }, 0)
-      .fromTo('.ruler--y .ruler__ticks', { autoAlpha: 1, clipPath: 'inset(0% 0% 100% 0%)' }, { clipPath: 'inset(0% 0% 0% 0%)', duration: 1.6, ease: 'expo.inOut' }, 0)
-      .fromTo('.frame-tag', { autoAlpha: 0, y: 8 }, { autoAlpha: 1, y: 0, duration: 0.9 }, 0.35)
-      .fromTo('.hero__kicker', { autoAlpha: 0, y: 12 }, { autoAlpha: 1, y: 0, duration: 0.9 }, 0.45);
-
-    gsap.set(words, { autoAlpha: 1, clipPath: 'inset(-0.6em -0.3em -0.08em -0.3em)' });
-    if (chars.length) {
-      tl.fromTo(chars, { yPercent: 118 }, { yPercent: 0, duration: 1.25, stagger: 0.045 }, 0.4);
-    } else {
-      tl.fromTo(words, { yPercent: 100 }, { yPercent: 0, duration: 1.2, stagger: 0.1 }, 0.4);
-    }
-
-    if (sel) {
-      var box = $('[data-measure]').getBoundingClientRect();
-      var dims = { w: 0, h: 0 };
-      measureLocked = true;
-      tl.fromTo(sel, { autoAlpha: 0, scale: 0.985 }, { autoAlpha: 1, scale: 1, duration: 0.8, ease: 'power2.out' }, 1.15)
-        .fromTo($$('i', sel), { scale: 0 }, { scale: 1, duration: 0.55, stagger: 0.07, ease: 'back.out(3)' }, 1.2)
-        .fromTo($('.selection__dim', sel), { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.6 }, 1.25)
-        .to(dims, {
-          w: box.width, h: box.height, duration: 1.3, ease: 'power3.out',
-          onUpdate: function () { if (label) label.textContent = formatDim(dims.w, dims.h); },
-          onComplete: function () { measureLocked = false; measure(); }
-        }, 1.25);
-    }
-
-    if (lede) {
-      var ls = split(lede, { type: 'lines', mask: 'lines', linesClass: 'hl' });
-      tl.set(lede, { autoAlpha: 1 }, 0.9);
-      if (ls) {
-        tl.fromTo(ls.lines, { yPercent: 130 }, { yPercent: 0, duration: 1.1, stagger: 0.09, onComplete: function () { ls.revert(); } }, 0.9);
-      }
-    }
-    tl.fromTo('.hero__spec', { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.01 }, 1.05)
-      .fromTo('.hero__spec .spec__row', { autoAlpha: 0, y: 14 }, { autoAlpha: 1, y: 0, duration: 0.8, stagger: 0.07 }, 1.05)
-      .fromTo('.hero__cta', { autoAlpha: 0, y: 14 }, { autoAlpha: 1, y: 0, duration: 0.9 }, 1.3)
-      .add(function () {
-        gsap.set(words, { clearProps: 'clipPath' });
-        splits.forEach(function (s) { s.revert(); });
-      });
-  }
-
   function heads(gsap, split) {
     $$('.head').forEach(function (head) {
       var rule = $('.head__rule', head);
@@ -372,13 +356,13 @@
       tl.fromTo($$('.head__n, .head__label', head), { autoAlpha: 0, y: 8 }, { autoAlpha: 1, y: 0, duration: 0.7, stagger: 0.08, ease: 'power3.out' }, 0.1);
       if (dim) {
         tl.add(function () {
-          var m = /(\d+)\D+(\d+)/.exec(dim.textContent);
+          var m = /(\d+)\D+(\d+)/.exec(getValue(dim));
           if (!m) return;
           var o = { w: 0, h: 0 };
           dim.__counting = true;
           gsap.to(o, {
             w: +m[1], h: +m[2], duration: 1.4, ease: 'power3.out',
-            onUpdate: function () { dim.textContent = formatDim(o.w, o.h); },
+            onUpdate: function () { setValue(dim, formatDim(o.w, o.h)); },
             onComplete: function () { dim.__counting = false; measure(); }
           });
         }, 0.2);
@@ -388,32 +372,36 @@
     });
 
     $$('[data-split]').forEach(function (title) {
-      var s = split(title, { type: 'lines', mask: 'lines', linesClass: 'line' });
-      if (!s) return;
-      gsap.fromTo(s.lines, { yPercent: 130 }, {
-        yPercent: 0, duration: 1.2, ease: 'expo.out', stagger: 0.1,
-        scrollTrigger: { trigger: title, start: 'top 85%', once: true },
-        onComplete: function () { s.revert(); }
+      whenNear(title, function () {
+        var s = split(title, { type: 'lines', mask: 'lines', linesClass: 'line' });
+        if (!s) return;
+        gsap.fromTo(s.lines, { yPercent: 130 }, {
+          yPercent: 0, duration: 1.2, ease: 'expo.out', stagger: 0.1,
+          scrollTrigger: { trigger: title, start: 'top 85%', once: true },
+          onComplete: function () { s.revert(); }
+        });
       });
     });
   }
 
   function products(gsap, split) {
     $$('.product').forEach(function (product) {
-      var text = $('.product__text', product);
-      var name = $('[data-split-chars]', product);
-      var visual = $('.product__visual', product);
-      var tl = gsap.timeline({ scrollTrigger: { trigger: product, start: 'top 72%', once: true } });
+      whenNear(product, function () {
+        var text = $('.product__text', product);
+        var name = $('[data-split-chars]', product);
+        var visual = $('.product__visual', product);
+        var tl = gsap.timeline({ scrollTrigger: { trigger: product, start: 'top 72%', once: true } });
 
-      var s = name ? split(name, { type: 'words,chars', mask: 'words', wordsClass: 'pw' }) : null;
-      if (s) {
-        tl.fromTo(s.chars, { yPercent: 140 }, { yPercent: 0, duration: 1.1, ease: 'expo.out', stagger: 0.035, onComplete: function () { s.revert(); } }, 0.1);
-      }
-      tl.fromTo($$('.product__kind, .product__tagline, .product__desc, .product__figures > div, .product__features li, .product__meta, .product__links li', text),
-        { autoAlpha: 0, y: 18 }, { autoAlpha: 1, y: 0, duration: 0.9, ease: 'power3.out', stagger: 0.05 }, 0.25);
-      if (visual) {
-        tl.fromTo(visual, { clipPath: 'inset(0% 0% 100% 0%)', y: 30 }, { clipPath: 'inset(0% 0% 0% 0%)', y: 0, duration: 1.3, ease: 'expo.inOut' }, 0.15);
-      }
+        var s = name ? split(name, { type: 'words,chars', mask: 'words', wordsClass: 'pw' }) : null;
+        if (s) {
+          tl.fromTo(s.chars, { yPercent: 140 }, { yPercent: 0, duration: 1.1, ease: 'expo.out', stagger: 0.035, onComplete: function () { s.revert(); } }, 0.1);
+        }
+        tl.fromTo($$('.product__kind, .product__tagline, .product__desc, .product__figures > div, .product__features li, .product__meta, .product__links li', text),
+          { autoAlpha: 0, y: 18 }, { autoAlpha: 1, y: 0, duration: 0.9, ease: 'power3.out', stagger: 0.05 }, 0.25);
+        if (visual) {
+          tl.fromTo(visual, { clipPath: 'inset(0% 0% 100% 0%)', y: 30 }, { clipPath: 'inset(0% 0% 0% 0%)', y: 0, duration: 1.3, ease: 'expo.inOut' }, 0.15);
+        }
+      });
     });
 
     var report = $('[data-report]');
@@ -434,7 +422,8 @@
       var state = $('[data-recipe-state]', recipe);
       var bar = $('.recipe__progress span', recipe);
       var total = items.length;
-      gsap.set(items, { autoAlpha: 0.18 });
+      var log = $('.recipe__log', recipe);
+      if (log) log.classList.add('is-pending');
       if (bar) gsap.set(bar, { scaleX: 0 });
       if (state) state.textContent = 'Ready';
       var ct = gsap.timeline({ scrollTrigger: { trigger: recipe, start: 'top 70%', once: true } });
@@ -442,7 +431,7 @@
         .add(function () { if (state) state.textContent = 'Deploying 0 / ' + total; }, 0.8);
       items.forEach(function (li, i) {
         var at = 1 + i * 0.22;
-        ct.to(li, { autoAlpha: 1, duration: 0.2, ease: 'none' }, at)
+        ct.add(function () { li.classList.add('is-done'); }, at)
           .to(bar, { scaleX: (i + 1) / total, duration: 0.2, ease: 'power1.out' }, at)
           .add(function () { if (state) state.textContent = (i + 1 === total ? 'Done ' : 'Deploying ') + (i + 1) + ' / ' + total; }, at);
       });
@@ -537,23 +526,25 @@
   function words(gsap, split) {
     var lead = $('[data-read]');
     if (lead) {
-      var big = $('.quote__big', lead);
-      var bs = big ? split(big, { type: 'lines', mask: 'lines', linesClass: 'line' }) : null;
-      if (bs) {
-        gsap.fromTo(bs.lines, { yPercent: 130 }, {
-          yPercent: 0, duration: 1.2, ease: 'expo.out', stagger: 0.1,
-          scrollTrigger: { trigger: lead, start: 'top 80%', once: true },
-          onComplete: function () { bs.revert(); }
-        });
-      }
-      var restEl = $('.quote__rest', lead);
-      var rest = restEl ? split(restEl, { type: 'words', wordsClass: 'qw', tag: 'span', aria: 'none' }) : null;
-      if (rest) {
-        gsap.fromTo(rest.words, { opacity: 0.16 }, {
-          opacity: 1, ease: 'none', stagger: 0.05,
-          scrollTrigger: { trigger: lead, start: 'top 70%', end: 'bottom 45%', scrub: 0.5 }
-        });
-      }
+      whenNear(lead, function () {
+        var big = $('.quote__big', lead);
+        var bs = big ? split(big, { type: 'lines', mask: 'lines', linesClass: 'bl', tag: 'span', aria: 'none' }) : null;
+        if (bs) {
+          gsap.fromTo(bs.lines, { yPercent: 130 }, {
+            yPercent: 0, duration: 1.2, ease: 'expo.out', stagger: 0.1,
+            scrollTrigger: { trigger: lead, start: 'top 80%', once: true },
+            onComplete: function () { bs.revert(); }
+          });
+        }
+        var restEl = $('.quote__rest', lead);
+        var rest = restEl ? split(restEl, { type: 'words', wordsClass: 'qw', tag: 'span', aria: 'none' }) : null;
+        if (rest) {
+          gsap.fromTo(rest.words, { color: '#67645d' }, {
+            color: '#151513', ease: 'none', stagger: 0.05,
+            scrollTrigger: { trigger: lead, start: 'top 70%', end: 'bottom 45%', scrub: 0.5 }
+          });
+        }
+      });
       gsap.fromTo($('.quote--lead .quote__by'), { autoAlpha: 0, y: 16 }, {
         autoAlpha: 1, y: 0, duration: 0.9, ease: 'power3.out',
         scrollTrigger: { trigger: '.quote--lead .quote__by', start: 'top 90%', once: true }
@@ -606,23 +597,30 @@
 
   /* ---------- Boot ---------- */
   function boot() {
+    var idle = window.requestIdleCallback || function (cb) { return setTimeout(cb, 1); };
     initClocks();
     initViewportTag();
-    initMeasure();
-    initRulers();
     initGrid();
     initCopy();
     initMenu();
-    initActiveNav();
+    initCoverIntro();
+    idle(function () { initMeasure(); initRulers(); initActiveNav(); }, { timeout: 800 });
 
-    if (reduceMotion.matches || !window.gsap) { root.classList.remove('motion'); return; }
-    var fontsReady = document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve();
+    if (reduceMotion.matches) return;
     var started = false;
-    var start = function () { if (started) return; started = true; initMotion(); };
-    fontsReady.then(start);
-    setTimeout(start, 1200);
+    var start = function () {
+      if (started || !window.gsap) return;
+      started = true;
+      var fontsReady = document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve();
+      fontsReady.then(function () { idle(initMotion, { timeout: 1200 }); });
+    };
+    // This file loads before the GSAP files (all deferred), so they have run by DOMContentLoaded.
+    if (window.gsap) start();
+    else {
+      document.addEventListener('DOMContentLoaded', start, { once: true });
+      window.addEventListener('load', start, { once: true });
+    }
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
-  else boot();
+  boot();
 })();

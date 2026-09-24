@@ -13,6 +13,24 @@
   font-style: normal;
   font-display: swap;
 }
+/* Arial tuned to Archivo's width and line metrics, so the swap barely moves text. */
+@font-face {
+  font-family: "Archivo Fallback";
+  src: local("Arial"), local("ArialMT"), local("Liberation Sans"), local("Arimo"), local("Helvetica Neue"), local("Helvetica");
+  size-adjust: 98.5%;
+  ascent-override: 89.1%;
+  descent-override: 21.3%;
+  line-gap-override: 0%;
+}
+/* Same file, but the giant cover name waits for it instead of flashing a fallback. */
+@font-face {
+  font-family: "Archivo Display";
+  src: url("../fonts/archivo-var.woff2") format("woff2");
+  font-weight: 300 850;
+  font-stretch: 62% 100%;
+  font-style: normal;
+  font-display: block;
+}
 @font-face {
   font-family: "Plex Mono";
   src: url("../fonts/plex-mono-400.woff2") format("woff2");
@@ -46,7 +64,7 @@
   --night-line: #34332f;
   --night-mute: #a29e95;
 
-  --font-sans: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --font-sans: "Archivo", "Archivo Fallback", "Helvetica Neue", Arial, sans-serif;
   --font-mono: "Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
 
   --gutter: clamp(1.125rem, 3.4vw, 3.5rem);
@@ -120,6 +138,9 @@ kbd { font-family: var(--font-mono); }
 .foot :focus-visible { outline-color: var(--signal); }
 
 .sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+/* Decorative measurements render from an attribute so they stay out of the page text. */
+[data-value]::after { content: attr(data-value); }
 
 .visually-hidden {
   position: absolute !important;
@@ -575,6 +596,7 @@ button svg,
   position: relative;
   display: block;
   width: fit-content;
+  font-family: "Archivo Display", var(--font-sans);
   font-size: min(calc(100cqi / 4.36), 22rem);
   font-stretch: 64%;
   font-weight: 780;
@@ -582,7 +604,7 @@ button svg,
   letter-spacing: -0.02em;
   white-space: nowrap;
 }
-.hero__word { display: inline-block; }
+.hero__word { display: inline-block; white-space: nowrap; }
 .selection--hero { inset: -0.05em -0.035em -0.02em; }
 
 .hero__body {
@@ -664,7 +686,9 @@ button svg,
 }
 
 .line-mask,
-.hl-mask { padding-bottom: 0.14em; margin-bottom: -0.14em; }
+.bl-mask { padding-bottom: 0.14em; margin-bottom: -0.14em; }
+.quote__big .bl,
+.quote__big .bl-mask { display: block; }
 
 /* ---------- 01 · Products (night) ---------- */
 
@@ -1389,7 +1413,7 @@ button svg,
   transition: color 0.2s, text-decoration-color 0.2s;
 }
 .contact__email:hover { color: var(--signal-ink); text-decoration-color: var(--signal); }
-.contact__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; margin-top: 1.5rem; }
+.contact__actions { flex-wrap: wrap; align-items: center; gap: 1rem; margin-top: 1.5rem; }
 .contact__status { font-family: var(--font-mono); font-size: 0.75rem; color: var(--signal-ink); }
 [data-copy-email].is-done { background: var(--ink); color: var(--paper); }
 
@@ -1584,12 +1608,41 @@ button svg,
 }
 .foot__top:hover { color: var(--signal); }
 
-/* ---------- Motion: states held until the intro runs ---------- */
+/* ---------- Cover intro (pure CSS so it never waits on the CDN) ---------- */
 
-.motion [data-intro],
-.motion .hero__word,
-.motion .selection--hero,
-.motion .ruler__ticks { visibility: hidden; }
+@media (prefers-reduced-motion: no-preference) {
+  .hero__word { clip-path: inset(-0.6em -0.3em -0.08em -0.3em); }
+  .hc {
+    display: inline-block;
+    animation: hc-rise 1.25s var(--ease-out) both;
+    animation-delay: calc(0.25s + var(--i) * 0.04s);
+  }
+  .intro { animation: intro-up 1s var(--ease-out) both; animation-delay: var(--d, 0s); }
+  .ruler--x .ruler__ticks { animation: ruler-x 1.6s cubic-bezier(0.87, 0, 0.13, 1) both; }
+  .ruler--y .ruler__ticks { animation: ruler-y 1.6s cubic-bezier(0.87, 0, 0.13, 1) both; }
+  .selection--hero { animation: intro-fade 0.8s ease-out 0.95s both; }
+  .selection--hero i { animation: handle-pop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+  .selection--hero i:nth-child(1) { animation-delay: 1s; }
+  .selection--hero i:nth-child(2) { animation-delay: 1.07s; }
+  .selection--hero i:nth-child(3) { animation-delay: 1.14s; }
+  .selection--hero i:nth-child(4) { animation-delay: 1.21s; }
+  .selection--hero .selection__dim { animation: intro-fade 0.6s ease-out 1.05s both; }
+}
+@keyframes hc-rise { from { transform: translateY(118%); } }
+@keyframes intro-up { from { opacity: 0; transform: translateY(14px); } }
+@keyframes intro-fade { from { opacity: 0; } }
+@keyframes handle-pop { from { transform: scale(0); } }
+@keyframes ruler-x { from { clip-path: inset(0 100% 0 0); } }
+@keyframes ruler-y { from { clip-path: inset(0 0 100% 0); } }
+
+/* Deploy log: pending rows stay readable; the check lights up when done. */
+.recipe__log.is-pending li { color: var(--night-mute); transition: color 0.3s; }
+.recipe__log.is-pending li::before { border-color: var(--night-line); transition: border-color 0.3s; }
+.recipe__log.is-pending li.is-done { color: #d9d5cc; }
+.recipe__log.is-pending li.is-done::before { border-color: var(--signal); }
+
+.contact__actions { display: none; }
+.js .contact__actions { display: flex; }
 
 /* ---------- Responsive ---------- */
 
